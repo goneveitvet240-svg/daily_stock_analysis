@@ -1,10 +1,13 @@
 name: 每日股票分析
 
 on:
-  # 定时触发 - 每天北京时间 18:13 (UTC 10:13)
-  # 避开 GitHub Actions 整点高峰，降低 schedule 事件被延迟或丢弃的概率。
+  # 定时触发 - 工作日北京时间 18:13 / 18:43 / 19:13
+  # 多个备用触发点可以降低 GitHub Actions schedule 事件被延迟或丢弃时漏跑的概率。
+  # 定时任务会先检查当天是否已生成正式报告，避免重复推送。
   schedule:
     - cron: '13 10 * * 1-5'    # 周一到周五，UTC 10:13 = 北京时间 18:13
+    - cron: '43 10 * * 1-5'    # 周一到周五，UTC 10:43 = 北京时间 18:43
+    - cron: '13 11 * * 1-5'    # 周一到周五，UTC 11:13 = 北京时间 19:13
   
   # 手动触发
   workflow_dispatch:
@@ -29,6 +32,10 @@ concurrency:
   group: stock-analysis
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   analyze:
     runs-on: ubuntu-latest
@@ -36,28 +43,121 @@ jobs:
     timeout-minutes: ${{ fromJSON(vars.ANALYSIS_TIMEOUT_MINUTES || '30') }}
     
     steps:
+      - name: 检查今日是否已生成报告
+        id: duplicate_check
+        if: github.event_name == 'schedule'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.request
+          from datetime import datetime, timezone, timedelta
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          current_run_id = int(os.environ["GITHUB_RUN_ID"])
+          token = os.environ.get("GITHUB_TOKEN", "")
+          tz = timezone(timedelta(hours=8))
+          today = datetime.now(tz).date()
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "User-Agent": "daily-stock-analysis",
+          }
+          if token:
+              headers["Authorization"] = f"Bearer {token}"
+
+          def get_json(url: str) -> dict:
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          runs_url = (
+              f"https://api.github.com/repos/{repo}/actions/workflows/"
+              "daily_analysis.yml/runs?per_page=20"
+          )
+          try:
+              runs = get_json(runs_url).get("workflow_runs", [])
+          except Exception as exc:
+              print(f"无法检查历史运行，继续执行本次分析: {exc}")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+                  fh.write("skip=false\n")
+              sys.exit(0)
+
+          for run in runs:
+              if int(run.get("id", 0)) == current_run_id:
+                  continue
+              if run.get("status") != "completed" or run.get("conclusion") != "success":
+                  continue
+              started_at = run.get("run_started_at") or run.get("created_at")
+              if not started_at:
+                  continue
+              run_day = datetime.fromisoformat(
+                  started_at.replace("Z", "+00:00")
+              ).astimezone(tz).date()
+              if run_day != today:
+                  continue
+
+              artifacts_url = (
+                  f"https://api.github.com/repos/{repo}/actions/runs/"
+                  f"{run['id']}/artifacts?per_page=20"
+              )
+              try:
+                  artifacts = get_json(artifacts_url).get("artifacts", [])
+              except Exception as exc:
+                  print(f"无法检查运行 {run['id']} 的产物，忽略该运行: {exc}")
+                  continue
+
+              has_report = any(
+                  artifact.get("name", "").startswith("analysis-reports-")
+                  and not artifact.get("expired", False)
+                  and int(artifact.get("size_in_bytes") or 0) > 10000
+                  for artifact in artifacts
+              )
+              if has_report:
+                  print(f"今天已生成正式报告，跳过备用触发: {run.get('html_url')}")
+                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+                      fh.write("skip=true\n")
+                  sys.exit(0)
+
+          print("今天尚未发现正式报告，继续执行本次分析。")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write("skip=false\n")
+          PY
+
+      - name: 显示跳过原因
+        if: steps.duplicate_check.outputs.skip == 'true'
+        run: echo "今日已有正式分析报告，本次备用定时触发跳过。"
+
       - name: 随机延迟（避免固定时间访问）
+        if: steps.duplicate_check.outputs.skip != 'true'
         run: sleep $((RANDOM % 60))  # 随机延迟0-60秒启动
       
       - name: 检出代码
+        if: steps.duplicate_check.outputs.skip != 'true'
         uses: actions/checkout@v5
       
       - name: 设置 Python 环境
+        if: steps.duplicate_check.outputs.skip != 'true'
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
       
       - name: 安装依赖
+        if: steps.duplicate_check.outputs.skip != 'true'
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
       
       - name: 创建必要目录
+        if: steps.duplicate_check.outputs.skip != 'true'
         run: |
           mkdir -p data logs reports
       
       - name: 执行股票分析
+        if: steps.duplicate_check.outputs.skip != 'true'
         env:
           # ==========================================
           # AI 配置
@@ -434,7 +534,7 @@ jobs:
       
       - name: 上传分析报告
         uses: actions/upload-artifact@v6
-        if: always()
+        if: always() && steps.duplicate_check.outputs.skip != 'true'
         with:
           name: analysis-reports-${{ github.run_number }}
           path: |
@@ -443,7 +543,7 @@ jobs:
           retention-days: 30
       
       - name: 显示运行结果
-        if: always()
+        if: always() && steps.duplicate_check.outputs.skip != 'true'
         run: |
           echo ""
           echo "=========================================="
