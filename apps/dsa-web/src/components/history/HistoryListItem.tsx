@@ -42,7 +42,10 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
   onToggleChecked,
   onClick,
 }) => {
-  const sentimentColor = item.sentimentScore !== undefined ? getSentimentColor(item.sentimentScore) : null;
+  const isAggregateReport = item.id < 0 || item.stockCode === 'DAILY';
+  const sentimentColor = typeof item.sentimentScore === 'number' && !isAggregateReport
+    ? getSentimentColor(item.sentimentScore)
+    : null;
   const stockName = item.stockName || item.stockCode;
   const isTruncated = isStockNameTruncated(stockName);
 
@@ -51,9 +54,13 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
       <div className="pt-5">
         <input
           type="checkbox"
-          checked={isChecked}
-          onChange={() => onToggleChecked(item.id)}
-          disabled={isDeleting}
+          checked={isAggregateReport ? false : isChecked}
+          onChange={() => {
+            if (!isAggregateReport) {
+              onToggleChecked(item.id);
+            }
+          }}
+          disabled={isDeleting || isAggregateReport}
           className="h-3.5 w-3.5 cursor-pointer rounded border-subtle-hover bg-transparent accent-primary focus:ring-primary/30 disabled:opacity-50"
         />
       </div>

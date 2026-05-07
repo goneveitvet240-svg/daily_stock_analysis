@@ -45,8 +45,9 @@ export const HistoryList: React.FC<HistoryListProps> = ({
   const selectAllRef = useRef<HTMLInputElement>(null);
   const selectAllId = useId();
 
-  const selectedCount = items.filter((item) => selectedIds.has(item.id)).length;
-  const allVisibleSelected = items.length > 0 && selectedCount === items.length;
+  const selectableItems = items.filter((item) => item.id > 0 && item.stockCode !== 'DAILY');
+  const selectedCount = selectableItems.filter((item) => selectedIds.has(item.id)).length;
+  const allVisibleSelected = selectableItems.length > 0 && selectedCount === selectableItems.length;
   const someVisibleSelected = selectedCount > 0 && !allVisibleSelected;
 
   // 使用 IntersectionObserver 检测滚动到底部
@@ -123,7 +124,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                   type="checkbox"
                   checked={allVisibleSelected}
                   onChange={onToggleSelectAll}
-                  disabled={isDeleting}
+                  disabled={isDeleting || selectableItems.length === 0}
                   aria-label="全选当前已加载历史记录"
                   className="history-select-all-checkbox h-3.5 w-3.5 cursor-pointer bg-transparent accent-primary focus:ring-primary/30 disabled:opacity-50"
                 />

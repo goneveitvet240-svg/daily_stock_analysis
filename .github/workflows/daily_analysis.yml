@@ -33,7 +33,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 jobs:
@@ -541,6 +541,88 @@ jobs:
             reports/
             logs/
           retention-days: 30
+
+      - name: 发布云端报告
+        if: success() && steps.duplicate_check.outputs.skip != 'true'
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import shutil
+          import subprocess
+          from datetime import datetime, timezone, timedelta
+          from pathlib import Path
+
+          tz = timezone(timedelta(hours=8))
+          now = datetime.now(tz)
+          root = Path.cwd()
+          reports_dir = root / "reports"
+          cloud_dir = root / "cloud_reports"
+          cloud_dir.mkdir(exist_ok=True)
+
+          candidates = sorted(
+              reports_dir.glob("report_*.md"),
+              key=lambda path: path.stat().st_mtime,
+              reverse=True,
+          )
+          if not candidates:
+              print("未发现 report_*.md，跳过云端报告发布。")
+              raise SystemExit(0)
+
+          source = candidates[0]
+          date_compact = source.stem.replace("report_", "", 1)
+          if not date_compact.isdigit():
+              date_compact = now.strftime("%Y%m%d")
+          date_text = f"{date_compact[:4]}-{date_compact[4:6]}-{date_compact[6:8]}"
+          target = cloud_dir / f"report_{date_compact}.md"
+          shutil.copy2(source, target)
+
+          index_path = cloud_dir / "index.json"
+          if index_path.exists():
+              try:
+                  index = json.loads(index_path.read_text(encoding="utf-8"))
+              except json.JSONDecodeError:
+                  index = {}
+          else:
+              index = {}
+
+          reports = index.get("reports", [])
+          reports = [item for item in reports if item.get("date_compact") != date_compact]
+          run_id = os.environ.get("GITHUB_RUN_ID", "")
+          run_number = os.environ.get("GITHUB_RUN_NUMBER", "")
+          repository = os.environ.get("GITHUB_REPOSITORY", "")
+          reports.append({
+              "date": date_text,
+              "date_compact": date_compact,
+              "title": f"{date_text} 每日股票分析日报",
+              "file": f"cloud_reports/report_{date_compact}.md",
+              "created_at": now.isoformat(),
+              "run_id": run_id,
+              "run_number": run_number,
+              "run_url": f"https://github.com/{repository}/actions/runs/{run_id}" if repository and run_id else "",
+              "source": "github_actions",
+          })
+          reports.sort(key=lambda item: item.get("date_compact", ""), reverse=True)
+          index["reports"] = reports[:120]
+          index["updated_at"] = now.isoformat()
+          index_path.write_text(
+              json.dumps(index, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
+          subprocess.run(
+              ["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"],
+              check=True,
+          )
+          subprocess.run(["git", "add", "cloud_reports"], check=True)
+          diff = subprocess.run(["git", "diff", "--cached", "--quiet"], check=False)
+          if diff.returncode == 0:
+              print("云端报告无变化，无需提交。")
+              raise SystemExit(0)
+          subprocess.run(["git", "commit", "-m", f"chore: publish daily report {date_text}"], check=True)
+          subprocess.run(["git", "push"], check=True)
+          PY
       
       - name: 显示运行结果
         if: always() && steps.duplicate_check.outputs.skip != 'true'

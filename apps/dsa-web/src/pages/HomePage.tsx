@@ -57,6 +57,10 @@ const HomePage: React.FC = () => {
   }, []);
   const reportLanguage = normalizeReportLanguage(selectedReport?.meta.reportLanguage);
   const reportText = getReportText(reportLanguage);
+  const isAggregateReport = selectedReport
+    ? selectedReport.meta.id !== undefined
+      && (selectedReport.meta.id < 0 || selectedReport.meta.stockCode === 'DAILY')
+    : false;
 
   useDashboardLifecycle({
     loadInitialHistory,
@@ -89,7 +93,7 @@ const HomePage: React.FC = () => {
   );
 
   const handleAskFollowUp = useCallback(() => {
-    if (selectedReport?.meta.id === undefined) {
+    if (selectedReport?.meta.id === undefined || isAggregateReport) {
       return;
     }
 
@@ -97,10 +101,10 @@ const HomePage: React.FC = () => {
     const name = selectedReport.meta.stockName;
     const rid = selectedReport.meta.id;
     navigate(`/chat?stock=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&recordId=${rid}`);
-  }, [navigate, selectedReport]);
+  }, [isAggregateReport, navigate, selectedReport]);
 
   const handleReanalyze = useCallback(() => {
-    if (!selectedReport) {
+    if (!selectedReport || isAggregateReport) {
       return;
     }
 
@@ -111,7 +115,7 @@ const HomePage: React.FC = () => {
       selectionSource: 'manual',
       forceRefresh: true,
     });
-  }, [selectedReport, submitAnalysis]);
+  }, [isAggregateReport, selectedReport, submitAnalysis]);
 
   const handleDeleteSelectedHistory = useCallback(() => {
     void deleteSelectedHistory();
@@ -270,7 +274,7 @@ const HomePage: React.FC = () => {
                   <Button
                     variant="home-action-ai"
                     size="sm"
-                    disabled={isAnalyzing || selectedReport.meta.id === undefined}
+                    disabled={isAnalyzing || selectedReport.meta.id === undefined || isAggregateReport}
                     onClick={handleReanalyze}
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -281,7 +285,7 @@ const HomePage: React.FC = () => {
                   <Button
                     variant="home-action-ai"
                     size="sm"
-                    disabled={selectedReport.meta.id === undefined}
+                    disabled={selectedReport.meta.id === undefined || isAggregateReport}
                     onClick={handleAskFollowUp}
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

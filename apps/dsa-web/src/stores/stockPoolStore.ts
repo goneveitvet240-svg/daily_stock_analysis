@@ -31,6 +31,10 @@ let analyzeRequestSeq = 0;
 let historyRequestSeq = 0;
 const dismissedTaskIds = new Set<string>();
 
+function isSelectableHistoryItem(item: HistoryItem): boolean {
+  return item.id > 0 && item.stockCode !== 'DAILY';
+}
+
 export interface StockPoolState {
   query: string;
   selectionSource: SelectionSource;
@@ -148,7 +152,7 @@ async function fetchHistory(
       set({ hasMore: totalLoaded < response.total });
     }
 
-    const visibleIds = new Set(get().historyItems.map((item) => item.id));
+    const visibleIds = new Set(get().historyItems.filter(isSelectableHistoryItem).map((item) => item.id));
     set({
       selectedHistoryIds: get().selectedHistoryIds.filter((id) => visibleIds.has(id)),
     });
@@ -244,6 +248,10 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
   },
 
   toggleHistorySelection: (recordId) => {
+    if (recordId <= 0) {
+      return;
+    }
+
     const selected = new Set(get().selectedHistoryIds);
     if (selected.has(recordId)) {
       selected.delete(recordId);
@@ -255,7 +263,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
   },
 
   toggleSelectAllVisible: () => {
-    const visibleIds = get().historyItems.map((item) => item.id);
+    const visibleIds = get().historyItems.filter(isSelectableHistoryItem).map((item) => item.id);
     const selectedIds = get().selectedHistoryIds;
     const visibleSet = new Set(visibleIds);
     const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
@@ -269,7 +277,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
 
   deleteSelectedHistory: async () => {
     const state = get();
-    const recordIds = Array.from(new Set(state.selectedHistoryIds));
+    const recordIds = Array.from(new Set(state.selectedHistoryIds)).filter((id) => id > 0);
     if (recordIds.length === 0 || state.isDeletingHistory) {
       return;
     }

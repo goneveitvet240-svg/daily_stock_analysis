@@ -27,6 +27,7 @@ from src.report_language import (
     localize_trend_prediction,
     normalize_report_language,
 )
+from src.services.cloud_report_service import CloudReportService
 from src.storage import DatabaseManager
 from src.utils.data_processing import normalize_model_used, parse_json_field
 
@@ -60,6 +61,7 @@ class HistoryService:
             db_manager: Database manager (optional, defaults to singleton instance)
         """
         self.db = db_manager or DatabaseManager.get_instance()
+        self.cloud_reports = CloudReportService()
     
     def get_history_list(
         self,
@@ -99,40 +101,74 @@ class HistoryService:
                 except ValueError:
                     logger.warning(f"无效的 end_date 格式: {end_date}")
             
-            # Calculate offset
             offset = (page - 1) * limit
-            
-            # Use new paginated query method
-            records, total = self.db.get_analysis_history_paginated(
+
+            cloud_items = self.cloud_reports.list_history_items(
+                stock_code=stock_code,
+                start_date=start_dt,
+                end_date=end_dt,
+            )
+
+            # Fetch the local DB page range from the beginning, then merge with
+            # cloud reports before slicing. This keeps pagination stable when a
+            # cloud report is newer than the newest local SQLite record.
+            _, db_total = self.db.get_analysis_history_paginated(
                 code=stock_code,
                 start_date=start_dt,
                 end_date=end_dt,
-                offset=offset,
-                limit=limit
+                offset=0,
+                limit=1,
             )
-            
-            # Convert to response format
-            items = []
+            db_fetch_limit = min(max(db_total, offset + limit, limit), 5000)
+            records, _ = self.db.get_analysis_history_paginated(
+                code=stock_code,
+                start_date=start_dt,
+                end_date=end_dt,
+                offset=0,
+                limit=db_fetch_limit,
+            )
+
+            items = list(cloud_items)
             for record in records:
-                items.append({
-                    "id": record.id,
-                    "query_id": record.query_id,
-                    "stock_code": record.code,
-                    "stock_name": record.name,
-                    "report_type": record.report_type,
-                    "sentiment_score": record.sentiment_score,
-                    "operation_advice": record.operation_advice,
-                    "created_at": record.created_at.isoformat() if record.created_at else None,
-                })
-            
+                items.append(self._record_to_history_item(record))
+
+            items.sort(key=self._history_item_sort_key, reverse=True)
+            total = db_total + len(cloud_items)
+
             return {
                 "total": total,
-                "items": items,
+                "items": items[offset:offset + limit],
             }
             
         except Exception as e:
             logger.error(f"查询历史列表失败: {e}", exc_info=True)
             return {"total": 0, "items": []}
+
+    @staticmethod
+    def _record_to_history_item(record) -> Dict[str, Any]:
+        return {
+            "id": record.id,
+            "query_id": record.query_id,
+            "stock_code": record.code,
+            "stock_name": record.name,
+            "report_type": record.report_type,
+            "sentiment_score": record.sentiment_score,
+            "operation_advice": record.operation_advice,
+            "created_at": record.created_at.isoformat() if record.created_at else None,
+        }
+
+    @staticmethod
+    def _history_item_sort_key(item: Dict[str, Any]) -> datetime:
+        created_at = item.get("created_at")
+        if created_at:
+            try:
+                parsed = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    return parsed.replace(tzinfo=None)
+                return parsed
+            except ValueError:
+                pass
+        return datetime.min
 
     def _resolve_record(self, record_id: str):
         """
@@ -168,6 +204,10 @@ class HistoryService:
             Complete analysis report dict, or None
         """
         try:
+            cloud_detail = self.cloud_reports.get_detail(record_id)
+            if cloud_detail:
+                return cloud_detail
+
             record = self._resolve_record(record_id)
             if not record:
                 return None
@@ -188,6 +228,9 @@ class HistoryService:
             List of news intel dicts
         """
         try:
+            if self.cloud_reports.is_cloud_record_id(record_id):
+                return []
+
             record = self._resolve_record(record_id)
             if not record:
                 logger.warning(f"resolve_and_get_news: record not found for {record_id}")
@@ -303,7 +346,10 @@ class HistoryService:
             Exception: Re-raises any storage-layer exception so the API caller
                        receives a proper 500 error instead of a silent success.
         """
-        return self.db.delete_analysis_history_records(record_ids)
+        local_record_ids = [record_id for record_id in record_ids if int(record_id) > 0]
+        if not local_record_ids:
+            return 0
+        return self.db.delete_analysis_history_records(local_record_ids)
 
     def get_news_intel(self, query_id: str, limit: int = 20) -> List[Dict[str, str]]:
         """
@@ -456,6 +502,10 @@ class HistoryService:
         Raises:
             MarkdownReportGenerationError: If report generation fails due to internal errors
         """
+        cloud_markdown = self.cloud_reports.get_markdown_report(record_id)
+        if cloud_markdown is not None:
+            return cloud_markdown
+
         record = self._resolve_record(record_id)
         if not record:
             logger.warning(f"get_markdown_report: record not found for {record_id}")
