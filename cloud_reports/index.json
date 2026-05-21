@@ -1,6 +1,17 @@
 {
   "reports": [
     {
+      "date": "2026-05-21",
+      "date_compact": "20260521",
+      "title": "2026-05-21 每日股票分析日报",
+      "file": "cloud_reports/report_20260521.md",
+      "created_at": "2026-05-21T21:53:20.347158+08:00",
+      "run_id": "26229181712",
+      "run_number": "35",
+      "run_url": "https://github.com/goneveitvet240-svg/daily_stock_analysis/actions/runs/26229181712",
+      "source": "github_actions"
+    },
+    {
       "date": "2026-05-20",
       "date_compact": "20260520",
       "title": "2026-05-20 每日股票分析日报",
@@ -122,5 +133,5 @@
       "source": "github_actions"
     }
   ],
-  "updated_at": "2026-05-20T20:58:47.378152+08:00"
+  "updated_at": "2026-05-21T21:53:20.347158+08:00"
 }
