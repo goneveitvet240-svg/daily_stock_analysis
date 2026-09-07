@@ -5,10 +5,10 @@
       "date_compact": "20260907",
       "title": "2026-09-07 每日股票分析日报",
       "file": "cloud_reports/report_20260907.md",
-      "created_at": "2026-09-07T23:53:08.150212+08:00",
-      "run_id": "34140267646",
-      "run_number": "266",
-      "run_url": "https://github.com/goneveitvet240-svg/daily_stock_analysis/actions/runs/34140267646",
+      "created_at": "2026-09-08T00:08:04.696227+08:00",
+      "run_id": "34141310253",
+      "run_number": "267",
+      "run_url": "https://github.com/goneveitvet240-svg/daily_stock_analysis/actions/runs/34141310253",
       "source": "github_actions"
     },
     {
@@ -837,5 +837,5 @@
       "source": "github_actions"
     }
   ],
-  "updated_at": "2026-09-07T23:53:08.150212+08:00"
+  "updated_at": "2026-09-08T00:08:04.696227+08:00"
 }
